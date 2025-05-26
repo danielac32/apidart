@@ -9,7 +9,7 @@ environment:
 # Add regular dependencies here.
 dependencies:
   # path: ^1.8.0
-  analyzer: ^7.4.5
+  build: ^2.4.2
   build_runner: ^2.4.15
   meta: ^1.17.0
   source_gen: ^2.0.0
@@ -19,16 +19,3 @@ dev_dependencies:
   test: ^1.24.0
 
 
-targets:
-  $default:
-    builders:
-      apidart|routeGenerator:
-        enabled: true
-
-builders:
-  routeGenerator:
-    import: "package:apidart/lib/generator/generator_route.dart"
-    builder_factories: ["routeGenerator"]
-    build_extensions: { ".dart": [".g.part"] }
-    auto_apply: root_package
-    default_options: {}
