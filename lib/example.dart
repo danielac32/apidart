@@ -11,8 +11,15 @@ class UserController {
   @Get('/users')
   void getAllUsers(HttpRequest request) {
     final users = _repository.getAll();
-    final response = jsonEncode(users.map((u) => u.toJson()).toList());
-    request.response.write(response);
+
+    final responseBody = {
+      'user': users.map((u) => u.toJson()).toList()
+    };
+
+    final responseJson = jsonEncode(responseBody);
+
+    request.response.headers.contentType = ContentType.json;
+    request.response.write(responseJson);
     request.response.close();
   }
 

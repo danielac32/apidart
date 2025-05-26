@@ -24,7 +24,7 @@ class AutoRouter {
     for (var declared in classMirror.instanceMembers.values) {
       if (declared is MethodMirror && !declared.isConstructor && !declared.isStatic) {
         final methodName = MirrorSystem.getName(declared.simpleName);
-
+        //print(methodName);
         // Verificar si tiene una anotación HTTP
         for (var ann in declared.metadata) {
           final annotation = ann.reflectee;
