@@ -1,6 +1,11 @@
 
 // annotations.dart
 
+class Controller{
+  final String path;
+  const Controller(this.path);
+}
+
 class Get {
   final String path;
   const Get(this.path);
@@ -16,7 +21,15 @@ class Put {
   const Put(this.path);
 }
 
+class Patch {
+  final String path;
+  const Patch(this.path);
+}
 class Delete {
   final String path;
   const Delete(this.path);
+}
+
+class Dto {
+  const Dto();
 }
