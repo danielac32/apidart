@@ -109,6 +109,7 @@ void main(List<String> arguments) {
  */
 import 'dart:mirrors';
 import 'package:alfred/alfred.dart';
+import 'package:apidart/dto/dto_lib.dart';
 
 
 typedef RequestHandlerWithMiddleware = FutureOr<void> Function(HttpRequest req, HttpResponse res);
@@ -280,8 +281,6 @@ class UserController {
     res.json({'message': 'Usuario actualizado', 'id': id});
   }
 
-
-
   @Get('')
   Future<void> list(HttpRequest req, HttpResponse res) async {
     res.json({'data': 'Lista de usuarios'});
@@ -317,7 +316,6 @@ class UserController {
 
   }
 
-
   @Post('')
   Future<void> create(HttpRequest req, HttpResponse res) async {
     /*final dto = await parseDto<CreateUserDto>(req, CreateUserDto.fromJson);
@@ -352,7 +350,25 @@ class UserController {
 Future<void> main(List<String> arguments) async {
 
 
+  final user = PersonDto()
+    ..userId = 1
+    ..email = 'johnexample.com'
+    ..password = 'secret';
 
+  // Convertir a JSON
+  final json = user.toJson();
+  print(json);
+  // Output: {'user_id': 1, 'name': 'John Doe', 'email': 'john@example.com'}
+
+  // Crear desde JSON
+  final newUser = PersonDto.fromJson({
+    'user_id': 2,
+    'name': 'Jane Doe',
+    'email': 'jane@example.com',
+    'password':'1524466'
+  });
+
+  print(newUser.name); // Output: Jane Doe
   final app = Alfred();
   // Registrar rutas automáticamente
   AutoRouter(app, UserController());

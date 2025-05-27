@@ -33,9 +33,7 @@ class Delete {
   const Delete(this.path);
 }
 
-/*class Dto {
-  const Dto();
-}*/
+
 class Middleware {
   const Middleware(this.handler);
   final FutureOr Function(HttpRequest, HttpResponse) handler;
