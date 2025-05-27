@@ -1,6 +1,9 @@
 
 // annotations.dart
 
+import 'dart:async';
+import 'dart:io';
+
 class Controller{
   final String path;
   const Controller(this.path);
@@ -30,6 +33,10 @@ class Delete {
   const Delete(this.path);
 }
 
-class Dto {
+/*class Dto {
   const Dto();
+}*/
+class Middleware {
+  const Middleware(this.handler);
+  final FutureOr Function(HttpRequest, HttpResponse) handler;
 }

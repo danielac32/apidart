@@ -3,12 +3,14 @@
 
 
 
+import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
 import 'package:alfred/alfred.dart';
 import 'package:apidart/annotations.dart';
-import 'package:apidart/example.dart';
+import 'package:apidart/dto.dart';
+//import 'package:apidart/example.dart';
 // auto_router.dart
 import 'dart:mirrors';
 
@@ -109,7 +111,7 @@ import 'dart:mirrors';
 import 'package:alfred/alfred.dart';
 
 
-typedef RequestHandler = Future<void> Function(HttpRequest request, HttpResponse response);
+typedef RequestHandlerWithMiddleware = FutureOr<void> Function(HttpRequest req, HttpResponse res);
 
 class AutoRouter {
   final Alfred app;
@@ -121,6 +123,7 @@ class AutoRouter {
 
     String basePath = '';
 
+    // Buscar @Controller
     for (var ann in classMirror.metadata) {
       final annotation = ann.reflectee;
       if (annotation is Controller) {
@@ -128,7 +131,9 @@ class AutoRouter {
         break;
       }
     }
-
+    if(basePath == null) {
+      throw StateError('El controlador debe tener anotación @Controller');
+    }
     // Registrar métodos
     for (var declared in classMirror.instanceMembers.values) {
       if (declared is MethodMirror && !declared.isConstructor && !declared.isStatic) {
@@ -139,30 +144,39 @@ class AutoRouter {
           final method = _extractHttpMethod(annotation);
 
           if (relativePath != null && method != null) {
-              final fullPath = joinPaths([basePath, relativePath]);// final fullPath = '$basePath$relativePath';
-              print('Ruta registrada: $fullPath');
-              final handler = _createHandler(controllerMirror, declared.simpleName);
+            final fullPath = joinPaths([basePath, relativePath]);
+            print('Ruta registrada: $fullPath');
 
-              switch (method) {
-                case 'GET':
-                  app.get(fullPath, handler, middleware: []);
-                case 'POST':
-                  app.post(fullPath, handler, middleware: []);
-                case 'PUT':
-                  app.put(fullPath, handler, middleware: []);
-                case 'DELETE':
-                  app.delete(fullPath, handler, middleware: []);
-                case 'PATCH':
-                  app.patch(fullPath, handler, middleware: []);
-                default:
-                  print('Método HTTP no soportado: $method');
+            // Extraer middlewares del método
+            final middlewares = extractMiddlewares(declared);
+            // Crear handler con middlewares
+            final handler = createHandlerWithMiddlewares(controllerMirror, declared.simpleName);
+
+            /*
+             final handler = (HttpRequest req, HttpResponse res) async {
+          await controllerMirror.invoke(declared.simpleName, [req, res]).reflectee;
+        };
+             */
+            // Registrar ruta en alfred
+            switch (method) {
+              case 'GET':
+                app.get(fullPath, handler, middleware: middlewares);
+              case 'POST':
+                app.post(fullPath, handler, middleware: middlewares);
+              case 'PUT':
+                app.put(fullPath, handler, middleware: middlewares);
+              case 'DELETE':
+                app.delete(fullPath, handler, middleware: middlewares);
+              case 'PATCH':
+                app.patch(fullPath, handler, middleware: middlewares);
+              default:
+                print('Método HTTP no soportado: $method');
             }
           }
         }
       }
     }
   }
-
 
   String joinPaths(List<String> paths) {
     return paths
@@ -171,6 +185,7 @@ class AutoRouter {
         .where((s) => s.isNotEmpty)
         .join('/');
   }
+
   String? _extractPath(dynamic annotation) {
     if (annotation is Get) return _normalizePath(annotation.path);
     if (annotation is Post) return _normalizePath(annotation.path);
@@ -187,6 +202,7 @@ class AutoRouter {
     // Elimina múltiples barras
     return path.split('/').where((p) => p.isNotEmpty).join('/');
   }
+
   String? _extractHttpMethod(dynamic annotation) {
     if (annotation is Get) return 'GET';
     if (annotation is Post) return 'POST';
@@ -196,106 +212,93 @@ class AutoRouter {
     return null;
   }
 
-  /*List<Middleware> _extractMiddlewares(dynamic annotation) {
-    if (annotation is Get) return annotation.middleware;
-    if (annotation is Post) return annotation.middleware;
-    if (annotation is Put) return annotation.middleware;
-    if (annotation is Delete) return annotation.middleware;
-    if (annotation is Patch) return annotation.middleware;
-    return [];
-  }*/
+  List<FutureOr Function(HttpRequest, HttpResponse)> extractMiddlewares(MethodMirror declared) {
+    final List<FutureOr Function(HttpRequest, HttpResponse)> middlewares = [];
 
-  RequestHandler _createHandler(InstanceMirror controllerMirror, Symbol methodSymbol) {
+    for (var ann in declared.metadata) {
+      final instance = ann.reflectee;
+      if (instance is Middleware) {
+        middlewares.add(instance.handler);
+      }
+    }
+    return middlewares;
+  }
+
+  RequestHandlerWithMiddleware createHandlerWithMiddlewares(InstanceMirror controllerMirror, Symbol methodSymbol) {
     return (HttpRequest request, HttpResponse response) async {
       try {
+        // Llamar al método del controlador
         await controllerMirror.invoke(methodSymbol, [request, response]).reflectee;
       } catch (e, stackTrace) {
         response.statusCode = 500;
-        response.write('Error ejecutando método: $e\n$stackTrace');
-        await response.close();
+        await response.json({'error': 'Error interno', 'message': e.toString(), 'stack': stackTrace.toString()});
       }
     };
   }
 }
 
 
-abstract class Dto {
-  Map<String, dynamic> toJson();
-}
-
-typedef DtoFactory<T extends Dto> = T Function(Map<String, dynamic> json);
-
-Future<T> parseDto<T extends Dto>(HttpRequest request, DtoFactory<T> fromJson) async {
-  final json = await request.bodyAsJsonMap;
-  return fromJson(json);
-  //if (json is! Map<String, dynamic>) {
-  //     throw AlfredException(HttpStatus.badRequest, {'error': 'El cuerpo debe ser un objeto JSON válido'});
-  //   }
-}
 
 
-class CreateUserDto implements Dto {
-  final String name;
-  final String email;
 
-  CreateUserDto({required this.name, required this.email});
 
-  factory CreateUserDto.fromJson(Map<String, dynamic> json) {
-    return CreateUserDto(
-      name: json['name'] as String? ?? '',
-      email: json['email'] as String? ?? '',
-    );
+
+
+
+FutureOr IdMiddleware(HttpRequest req, HttpResponse res) async {
+  // Parsear el cuerpo de la solicitud como un Map<String, dynamic>
+  final params = await req.params;
+
+  // Extraer los campos email y password
+  final id = params['id'] as String?;
+
+  // Validar que ambos campos existan
+  if (id == null || id.isEmpty) {
+    throw AlfredException(400, {'error': 'El id es requerido'});
   }
-  @override
-  Map<String, dynamic> toJson() => {
-    'name': name,
-    'email': email,
-  };
 }
 
-class LoginDto implements Dto{
-  final String name;
-  final String email;
-  LoginDto({required this.name, required this.email});
-  factory LoginDto.fromJson(Map<String, dynamic> json) {
-    return LoginDto(
-      name: json['name'] as String? ?? '',
-      email: json['email'] as String? ?? '',
-    );
+FutureOr statusMiddleware(HttpRequest req, HttpResponse res) async {
+  // Parsear el cuerpo de la solicitud como un Map<String, dynamic>
+  final body = await req.bodyAsJsonMap;
+  // Validar que ambos campos existan
+  if (body['status'] == null || body['status'].isEmpty) {
+    throw AlfredException(400, {'error': 'El status es requerido'});
   }
-  @override
-  Map<String, dynamic> toJson() => {
-    'name': name,
-    'email': email,
-  };
 }
-
-
-
-
-
 
 
 
 @Controller("users/")
 class UserController {
+
+  @Patch(':id')
+  @Middleware(IdMiddleware)
+  @Middleware(statusMiddleware)
+  Future<void> updateById(HttpRequest req, HttpResponse res) async {
+    final id = req.params['id'];
+    res.json({'message': 'Usuario actualizado', 'id': id});
+  }
+
+
+
   @Get('')
   Future<void> list(HttpRequest req, HttpResponse res) async {
     res.json({'data': 'Lista de usuarios'});
   }
 
-  @Get('get'/*, middleware: [authMiddleware, validateIdMiddleware]*/)
+  @Get('get')
   Future<void> getParams(HttpRequest req, HttpResponse res) async {
     final status = req.uri.queryParameters['status'] ?? 'all';
     res.json({'data': 'params: $status'});
   }
 
-
-  @Get('{id}/get/{id2}'/*, middleware: [authMiddleware, validateIdMiddleware]*/)
+@Middleware(IdMiddleware)
+  @Get('{id}')
   Future<void> getById(HttpRequest req, HttpResponse res) async {
     final id = req.params['id'];
-    final id2 = req.params['id2'];
-    res.json({'data': 'Usuario con ID: $id $id2'});
+    //final id2 = req.params['id2'];
+    res.json({'data': 'Usuario con ID: $id '});
   }
 
 
@@ -328,13 +331,8 @@ class UserController {
     });*/
   }
 
-  @Patch(':id')
-  Future<void> updateById(HttpRequest req, HttpResponse res) async {
-    final id = req.params['id'];
-    res.json({'message': 'Usuario actualizado', 'id': id});
-  }
 
-  @Delete('/users/:id')
+  @Delete(':id')
   Future<void> deleteById(HttpRequest req, HttpResponse res) async {
     final id = req.params['id'];
     res.json({'message': 'Usuario eliminado', 'id': id});
@@ -342,69 +340,12 @@ class UserController {
 }
 
 
-@Controller("test/")
-class TestController {
-  @Get('')
-  Future<void> list(HttpRequest req, HttpResponse res) async {
-    res.json({'data': 'Lista de usuarios'});
-  }
-
-  @Get('get'/*, middleware: [authMiddleware, validateIdMiddleware]*/)
-  Future<void> getParams(HttpRequest req, HttpResponse res) async {
-    final status = req.uri.queryParameters['status'] ?? 'all';
-    res.json({'data': 'params: $status'});
-  }
 
 
-  @Get('{id}/get/{id2}'/*, middleware: [authMiddleware, validateIdMiddleware]*/)
-  Future<void> getById(HttpRequest req, HttpResponse res) async {
-    final id = req.params['id'];
-    final id2 = req.params['id2'];
-    res.json({'data': 'Usuario con ID: $id $id2'});
-  }
 
 
-  @Post('login')
-  Future<void> login(HttpRequest req, HttpResponse res) async {
-    // final json = await req.bodyAsJsonMap;
-    final dto = await parseDto<LoginDto>(req, LoginDto.fromJson);
-
-    print('Nombre: ${dto.name}');
-    print('Email: ${dto.email}');
-
-    res.json({
-      'message': 'Usuario creado',
-      'data': dto.toJson(),
-    });
-
-  }
 
 
-  @Post('')
-  Future<void> create(HttpRequest req, HttpResponse res) async {
-    final dto = await parseDto<CreateUserDto>(req, CreateUserDto.fromJson);
-
-    print('Nombre: ${dto.name}');
-    print('Email: ${dto.email}');
-
-    res.json({
-      'message': 'Usuario creado',
-      'data': dto.toJson(),
-    });
-  }
-
-  @Patch(':id')
-  Future<void> updateById(HttpRequest req, HttpResponse res) async {
-    final id = req.params['id'];
-    res.json({'message': 'Usuario actualizado', 'id': id});
-  }
-
-  @Delete('/users/:id')
-  Future<void> deleteById(HttpRequest req, HttpResponse res) async {
-    final id = req.params['id'];
-    res.json({'message': 'Usuario eliminado', 'id': id});
-  }
-}
 
 
 
@@ -415,7 +356,7 @@ Future<void> main(List<String> arguments) async {
   final app = Alfred();
   // Registrar rutas automáticamente
   AutoRouter(app, UserController());
-  AutoRouter(app, TestController());
+
 
 
 
